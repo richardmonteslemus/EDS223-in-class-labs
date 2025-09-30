@@ -2,7 +2,7 @@
 title: "Week 1: Lab"
 subtitle: "Making maps with `tmap`"
 author: "Richard Montes Lemus"
-date: 2025-10-2
+date: 2025-30-09
 execute: 
   eval: true
 format:
