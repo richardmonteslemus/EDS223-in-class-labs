@@ -1,0 +1,105 @@
+---
+title: "Week 2 Lab Colombia Biodiverse Data"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(sf)
+library(tmap)
+library(here)
+```
+
+```{r}
+colombia <- st_read(here("week2", "data", "Colombia", "Colombia.shp"))
+```
+```{r}
+roads <- st_read(here("week2", "data", "RDLINE_colombia", "RDLINE_colombia.shp"))
+```
+
+```{r}
+birds <- read_csv(here("week2", "data", "dataves.csv"))
+```
+```{r}
+# 1. 
+birds <- birds %>% 
+  as_tibble() %>% 
+  rename(long = decimal_longitude) %>% 
+  rename(lat = decimal_latitude) %>% 
+  st_as_sf(coords = c("long", "lat"), crs = 4326)
+```
+
+```{r}
+class(birds)
+class(colombia)
+class(roads)
+```
+```{r}
+unique(st_geometry_type(birds))
+unique(st_geometry_type(colombia))
+unique(st_geometry_type(roads))
+```
+3 Select macro ecoregion of interest
+
+```{r}
+carribean_meso <- colombia %>% 
+  mutate(N1_Macrobi = as.factor("N1_MacroBi")) %>% 
+  filter(N1_MacroBi == "Caribbeo Mesoamerican") 
+  
+```
+
+```{r}
+tm_shape(carribean_meso) +
+  tm_polygons() + 
+  tm_title("Carribean Mesoamerican Ecoregion")
+```
+
+```{r}
+st_crs(colombia)
+```
+```{r}
+st_crs(birds)
+```
+
+```{r}
+st_crs(roads)
+```
+```{r}
+st_crs(col)$units
+st_crs(birds)$units
+st_crs(roads)$units
+```
+
+```{r}
+aves_df_st_coords <- birds %>%
+  dplyr::mutate(lon = st_coordinates(.)[,1], 
+                lat = st_coordinates(.)[,2])  %>% 
+  st_drop_geometry() 
+```
+
+```{r}
+aves_df_purrr <- birds %>% 
+  st_as_sf(coords = c("lon", "lat"), crs = 4326)
+```
+
+```{r}
+# Boolen check if CRS match between 2 datasets
+st_crs(colombia) == st_crs(roads)
+```
+
+```{r}
+# Transform bird observation dataset into same CRS as other Colombia dataset
+birds <- st_transform(birds, crs = st_crs(colombia))
+```
+
+```{r}
+tm_shape(colombia) +
+  tm_polygons() +
+  tm_shape(roads) +
+  tm_lines() +
+  tm_shape(birds) +
+  tm_dots() +
+  tm_title("Colombia ecoregions, roads,\nand bird observations")
+```
+
