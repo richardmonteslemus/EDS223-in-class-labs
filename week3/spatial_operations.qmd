@@ -301,22 +301,36 @@ tm_shape(cycle_hire_osm) +
 ```
 
 Let's build some checks to diagnose the output.
-
 ```{r}
-cycle_hire_join <- st_join(cycle_hire, cycle_hire_osm,
-                           st_is_within_distance, 
-                           dist = units::set_units(20, "m")) %>% 
-  select(id, capacity)
-
-head(cycle_hire_join)
+if(nrow(cycle_hire) == nrow(cycle_hire_join)){
+  print("join matches original data dimensions")
+} else {
+  warning("join does not match orginal data dimensions")
+  print(paste("cycle_hire has", nrow(cycle_hire), "rows"))
+  print(paste("cycle_hire_join has", nrow(cycle_hire_join), "rows"))
+}
 ```
+
 
 Note that the joined result has more rows than the target data. This is because some of the cycle hire stations in `cycle_hire` have multiple matches in `cycle_hire_osm`. Depending on your project, you would need to think about how to resolve this. In this case, we can aggregate the values for the overlapping points by taking the mean.
 
+
 ```{r}
-tm_shape(cycle_hire_join) + 
-  tm_symbols(fill = "red", fill_alpha = 0.2)
+# aggregate values for single points in cycle_hire
+cycle_hire_join <- cycle_hire_join %>%
+  group_by(id) %>%
+  summarise(capacity = mean(capacity))
+
+# check results
+if(nrow(cycle_hire) == nrow(cycle_hire_join)){
+  print("join matches original data dimensions")
+} else {
+  warning("join does not match orginal data dimensions")
+  print(paste("cycle_hire has", nrow(cycle_hire), "rows"))
+  print(paste("cycle_hire_join has", nrow(cycle_hire_join), "rows"))
+}
 ```
+
 
 ### 4. Spatial aggregation
 
@@ -327,20 +341,59 @@ Let's consider the example where we would like to make a map of the mean elevati
 The first approach is by leveraging `st_join()` again. But in this example, we want the `nz` object to be the target to maintain the geometries we need.
 
 ```{r}
-
+tmap_mode("plot")
 ```
 
-The second approah uses the `aggregate()` function. Although it doesn't follow the `dplyr` piping convention we're used to, `aggregate()` will come in handy later, so it's nice to see how it works.
+```{r}
+nz_elevation_join <- st_join(x = nz, y = nz_height) %>% 
+  group_by(Name) %>% 
+  summarise(elevation = mean(elevation, na.rm = TRUE))
+```
+
+The second approach uses the `aggregate()` function. Although it doesn't follow the `dplyr` piping convention we're used to, `aggregate()` will come in handy later, so it's nice to see how it works.
 
 The syntax looks slightly different, in this case the argument `x` is the data we would like to aggregate (`nz_height`) and the `by` argument specifies the geometry that you would like to group by. The `FUN` argument defines the function that you would like to use to aggregate, in this case `mean`.
 
 ```{r}
+nz_elevation_agg <- aggregate(x = nz_height, by = nz, FUN = mean)
 ```
 
 
 ```{r}
 #| message: false
+map1 <- tm_shape(nz_elevation_join) + 
+  tm_polygons(fill = "elevation",
+              fill.legend = tm_legend(title = "Mean elevation (meters)")) + 
+  tm_title(text = "group_by()")
 
+map2 <- tm_shape(nz_elevation_agg) + 
+  tm_polygons(fill = "elevation",
+              fill.legend = tm_legend(title = "Mean elevation (meters)")) + 
+  tm_title(text = "aggregate()")
+
+map1 <- tm_shape(us_states) +
+  tm_polygons(fill = "total_pop_15",
+              fill.legend  = tm_legend("Total population")) +
+  tm_title(text = "US States")
+  # tm_layout(meta.margins = c(.2, 0, 0, 0))
+
+map2 <- tm_shape(regions1) +
+  tm_polygons(fill = "population",
+              fill.legend  = tm_legend("Total population")) +
+  tm_title(text = "group_by()")
+  # tm_layout(meta.margins = c(.2, 0, 0, 0))
+
+map3 <- tm_shape(regions2) +
+  tm_polygons(fill = "total_pop_15",
+              fill.legend  = tm_legend("Total population")) +
+  tm_title(text = "aggregate()") 
+  # tm_layout(meta.margins = c(.2, 0, 0, 0))
+
+tmap_arrange(map1, map2, map3, nrow = 1)
+```
+
+```{r}
+tmap_arrange(map1, map2, nrow = 1)
 ```
 
 :::{.callout-note icon=true}
@@ -352,13 +405,30 @@ However, in some cases the aggregating zones do not share common borders with th
 
 
 ```{r}
+incongruent <- spData::incongruent
+aggregating_zones <- spData::aggregating_zones
 
+tm_shape(incongruent) + 
+  tm_polygons(fill = "lightblue",
+              col = "blue") + 
+  tm_shape(aggregating_zones) + 
+  tm_borders(col = "red") 
 ```
 
 The simplest useful method for this is area weighted spatial interpolation, which transfers values from the `incongruent` object to a new column in `aggregating_zones` in proportion with the area of overlap: the larger the spatial intersection between input and output features, the larger the corresponding value. This is implemented in `st_interpolate_aw()`, as demonstrated in the code chunk below.
 
 ```{r}
+# Select just the value we want to aggregate 
+incongruent_2 <- incongruent %>% 
+  select(value)
 
+# Use area-weighted interpolation to aggregae the "value" attribute
+
+aggregating_zones_area_weighted <- st_interpolate_aw(x = incongruent_2, aggregating_zones, 
+                                                    extensive = TRUE)
+
+
+aggregating_zones_area_weighted$value
 ```
 
 :::
@@ -370,6 +440,22 @@ In the previous section, we saw how we can use spatial relationship of datasets 
 In this section, we will explore operations that change the geometries directly.
 
 ## 1. Aggregating
+```{r}
+# load US states
+us_states <- spData::us_states
+
+# summarize total population within each region
+regions1 <- us_states %>%
+  group_by(REGION) %>%
+  summarise(population = sum(total_pop_15, na.rm = TRUE))
+
+# alternative approach
+regions2 <- aggregate(x = us_states[, "total_pop_15"], # data and attribute to be aggregated
+                      by = list(us_states$REGION), # attribute to aggregate by
+                      FUN = sum, na.rm = TRUE) # aggregating function
+
+
+```
 
 ### Geometry unions
 
@@ -391,7 +477,38 @@ We may come across situations where we would like to summarize data across sever
 What's going on here? Behind the scenes, R is using `st_union()` to combine geometries within each group. We can also use `st_union()` to combine any pair of spatial objects.
 
 ```{r}
+# combine geometries of western states 
+us_west <- us_states[us_states$REGION == "West", ]
+us_west_union <- st_union(us_west)
 
+# Combine geometries of Texas and western states 
+texas <- us_states[us_states$NAME == "Texas", ]
+texas_union <- st_union(us_west_union, texas)
+
+```
+
+```{r}
+map1 <- tm_shape(us_west) +
+  tm_polygons() +
+  tm_title(text = "western states")
+  # tm_layout(meta.margins = c(.2, 0, 0, 0))
+
+map2 <- tm_shape(us_west_union) +
+  tm_polygons() +
+  tm_title(text = "western states union")
+  # tm_layout(meta.margins = c(.2, 0, 0, 0))
+
+map3 <- tm_shape(texas) +
+  tm_polygons() +
+  tm_title(text = "TX")
+  # tm_layout(meta.margins = c(.2, 0, 0, 0))
+
+map4 <- tm_shape(texas_union) +
+  tm_polygons() +
+  tm_title(text = "TX + western states union")
+  # tm_layout(meta.margins = c(.2, 0, 0, 0))
+
+tmap_arrange(map1, map2, map3, map4, nrow = 2)
 ```
 
 ```{r}
@@ -409,25 +526,61 @@ In the previous section, we saw that we can filter spatial objects based on thei
 
 In this example, let's create 5 km and 50 km buffers around the Seine.
 ```{r}
+seine_buffer_5km <- st_buffer(seine, dist = units::set_units(5, "km"))
 
+seine_buffer_50km <- st_buffer(seine, dist = units::set_units(50, "km"))
 ```
 
 ```{r}
+map1 <- tm_shape(seine_buffer_5km) +
+  tm_polygons() +
+  tm_shape(seine) +
+  tm_lines() +
+  tm_title(text = "5km buffer") 
+  # tm_layout(meta.margins = c(.2, 0, 0, 0))
 
+map2 <- tm_shape(seine_buffer_50km) +
+  tm_polygons() +
+  tm_shape(seine) +
+  tm_lines() +
+  tm_title(text = "50km buffer")
+  # tm_layout(meta.margins = c(.2, 0, 0, 0))
+
+tmap_arrange(map1, map2, nrow = 1)
 ```
+
 
 The Seine is actually comprised of multiple geometries. To make things simpler, and more look better on maps, we can combine geometries using our new friend `st_union`!
-
 ```{r}
+seine_union <- st_union(seine_buffer_50km)
+
 ```
 
-```{r}
 
+```{r}
+tm_shape(seine_union) +
+  tm_polygons() +
+  tm_shape(seine) +
+  tm_lines() +
+  tm_title(text= "50km buffer")
 ```
 
 Now let's see an example of using a buffer to find objects within a set distance. Here, we'll repeat our previous example of finding points within 100 km of Canterbury. And check to see if the results match our previous approach!
 
 ```{r}
+# create buffer around high points
+nz_height_buffer <- st_buffer(nz_height, dist = 1000000)
+
+# filter buffered points with those that intersect Canterbury
+c_height5 <- nz_height_buffer %>%
+  st_filter(y = canterbury, .predicate = st_intersects)
+
+# check to see if results match previous approach
+if(nrow(c_height4) == nrow(c_height5)){
+  print("results from buffer approach match st_is_within_distance() approach")
+} else{
+  warning("approaches giving different results")
+}
 
 ```
 
@@ -509,10 +662,23 @@ map6 <- map1 +
 tmap_arrange(map1, map2, map3, map4, map5, map6, nrow = 2)
 ```
 
+
 Now let's see how we could use these updated geometries for filtering. Extending this simple example, we'll create 100 random points. We want to find the points that intersect both `x` and `y`. We have a few different approaches that all produce the same results.
 
 ```{r}
+# create buffer around high points
+nz_height_buffer <- st_buffer(nz_height, dist = 1000000)
 
+# filter buffered points with those that intersect Canterbury
+c_height5 <- nz_height_buffer %>%
+  st_filter(y = canterbury, .predicate = st_intersects)
+
+# check to see if results match previous approach
+if(nrow(c_height4) == nrow(c_height5)){
+  print("results from buffer approach match st_is_within_distance() approach")
+} else{
+  warning("approaches giving different results")
+}
 
 ```
 
@@ -535,11 +701,35 @@ Sometimes the geographic centroid may fall outside of the boundaries of the obje
 Let's inspect a few examples!
 
 ```{r}
+nz_centroid <- st_centroid(nz)
 
+seine_centroid <- st_centroid(seine)
+
+nz_pos <- st_point_on_surface(nz)
+
+seine_pos <- st_point_on_surface(seine)
+
+# center used ot be red point now its blue point 
 ```
 
 ```{r}
+map1 <- tm_shape(nz) +
+  tm_polygons() +
+  tm_shape(nz_centroid) +
+  tm_symbols(fill = "red", fill_alpha = 0.5) +
+  tm_shape(nz_pos) +
+  tm_symbols(fill = "blue", fill_alpha = 0.5)+ 
+  tm_layout(meta.margins = c(.2, 0, 0, 0))
 
+map2 <- tm_shape(seine) +
+  tm_lines() +
+  tm_shape(seine_centroid) +
+  tm_symbols(fill = "red", fill_alpha = 0.5) +
+  tm_shape(seine_pos) +
+  tm_symbols(fill = "blue", fill_alpha = 0.5)+ 
+  tm_layout(meta.margins = c(.2, 0, 0, 0))
+
+tmap_arrange(map1, map2, nrow = 1)
 ```
 
 ### Simplification
@@ -547,11 +737,21 @@ We may also want to simplify a `geometry` to make it easier to plot or take up l
 
 Let's see an example!
 ```{r}
-
+seine_simple <- st_simplify(seine, dTolerance = 2000)  # 2000 m
 ```
 
 ```{r}
+map1 <- tm_shape(seine) +
+  tm_lines() +
+  tm_title("original") 
+  #tm_layout(meta.margins = c(.2, 0, 0, 0))
 
+map2 <- tm_shape(seine_simple) +
+  tm_lines() +
+  tm_title("st_simplify()")
+  #tm_layout(meta.margins = c(.2, 0, 0, 0))
+
+tmap_arrange(map1, map2, nrow = 1)
 ```
 
 # Summary of new functions
