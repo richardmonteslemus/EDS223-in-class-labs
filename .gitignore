@@ -1,3 +1,6 @@
+# Ignore data files
+week2/data/
+
 # History files
 .Rhistory
 .Rapp.history
