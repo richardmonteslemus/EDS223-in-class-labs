@@ -1,4 +1,5 @@
 # Ignore data files
+data/
 week2/data/
 
 # History files
