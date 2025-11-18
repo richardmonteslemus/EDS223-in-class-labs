@@ -1,6 +1,7 @@
 # Ignore data files
 data/
 week2/data/
+week8/data/
 
 # History files
 .Rhistory
