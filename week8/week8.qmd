@@ -394,7 +394,20 @@ landsat_df %>%
     SWIR1 = mean(SWIR1), 
     SWIR2 = mean(SWIR2)) %>% 
   knitr::kable(digits = 2, 
-               caption = "Mean spectral values by Cluster")
+               caption = "Mean spectral values by Cluster") 
+
+# Create raster attribute table 
+
+# Cluster 3 = green vegetation 
+# Cluster 1 = soil 
+# Cluster 4 = water 
+# Cluster 2 = urban 
+
+# Set category labels 
+levels(SB_classification_kmeans) <- data.frame(
+  ID = 1:4, 
+  landcover = c("soil/dead grass", "urban", "green vegetation", "water")
+)
 
 ```
 
@@ -403,7 +416,19 @@ landsat_df %>%
 Now we can plot the results and check out our land cover map!
 
 ```{r}
+# Plot results 
+kmeans_plot <- tm_shape(SB_classification_kmeans) + 
+  tm_raster(
+    col.scale = tm_scale(
+      values = c("#F2DD84", "#7E8987", "#8DB590", "#6A8EAE"), 
+      labels = c("soil/dead grass", "urban", "green vegetation", "water")
+    ), 
+    col.legend = tm_legend("Landcover type")
+  ) + 
+  tm_title( text = "K-Means Landcover Classification") + 
+  tm_layout(legend.position = c("left", "bottom"))
 
+kmeans_plot
 ```
 
 ## 6. Compare our decision tree and kmeans algorithm classification
